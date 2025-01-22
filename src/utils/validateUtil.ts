@@ -1,6 +1,6 @@
-import RawAsyncValidator from 'async-validator';
+import RawAsyncValidator from '@rc-component/async-validator';
 import * as React from 'react';
-import warning from 'rc-util/lib/warning';
+import warning from '@rc-component/util/lib/warning';
 import type {
   InternalNamePath,
   InternalValidateOptions,
@@ -9,7 +9,7 @@ import type {
   RuleError,
 } from '../interface';
 import { defaultValidateMessages } from './messages';
-import { merge } from 'rc-util/lib/utils/set';
+import { merge } from '@rc-component/util/lib/utils/set';
 
 // Remove incorrect original ts define
 const AsyncValidator: any = RawAsyncValidator;
@@ -19,7 +19,10 @@ const AsyncValidator: any = RawAsyncValidator;
  *   `I'm ${name}` + { name: 'bamboo' } = I'm bamboo
  */
 function replaceMessage(template: string, kv: Record<string, string>): string {
-  return template.replace(/\$\{\w+\}/g, (str: string) => {
+  return template.replace(/\\?\$\{\w+\}/g, (str: string) => {
+    if (str.startsWith('\\')) {
+      return str.slice(1);
+    }
     const key = str.slice(2, -1);
     return kv[key];
   });

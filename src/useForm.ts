@@ -1,4 +1,5 @@
-import warning from 'rc-util/lib/warning';
+import { merge } from '@rc-component/util/lib/utils/set';
+import warning from '@rc-component/util/lib/warning';
 import * as React from 'react';
 import { HOOK_MARK } from './FieldContext';
 import type {
@@ -6,12 +7,15 @@ import type {
   FieldData,
   FieldEntity,
   FieldError,
+  FilterFunc,
   FormInstance,
+  GetFieldsValueConfig,
   InternalFieldData,
   InternalFormInstance,
   InternalHooks,
   InternalNamePath,
   InternalValidateFields,
+  InternalValidateOptions,
   Meta,
   NamePath,
   NotifyInfo,
@@ -20,14 +24,10 @@ import type {
   StoreValue,
   ValidateErrorEntity,
   ValidateMessages,
-  InternalValidateOptions,
   ValuedNotifyInfo,
   WatchCallBack,
-  FilterFunc,
-  GetFieldsValueConfig,
 } from './interface';
 import { allPromiseFinish } from './utils/asyncUtil';
-import { merge } from 'rc-util/lib/utils/set';
 import { defaultValidateMessages } from './utils/messages';
 import NameMap from './utils/NameMap';
 import {
@@ -156,15 +156,20 @@ export class FormStore {
     }
   };
 
-  private destroyForm = () => {
-    const prevWithoutPreserves = new NameMap<boolean>();
-    this.getFieldEntities(true).forEach(entity => {
-      if (!this.isMergedPreserve(entity.isPreserve())) {
-        prevWithoutPreserves.set(entity.getNamePath(), true);
-      }
-    });
-
-    this.prevWithoutPreserves = prevWithoutPreserves;
+  private destroyForm = (clearOnDestroy?: boolean) => {
+    if (clearOnDestroy) {
+      // destroy form reset store
+      this.updateStore({});
+    } else {
+      // Fill preserve fields
+      const prevWithoutPreserves = new NameMap<boolean>();
+      this.getFieldEntities(true).forEach(entity => {
+        if (!this.isMergedPreserve(entity.isPreserve())) {
+          prevWithoutPreserves.set(entity.getNamePath(), true);
+        }
+      });
+      this.prevWithoutPreserves = prevWithoutPreserves;
+    }
   };
 
   private getInitialValue = (namePath: InternalNamePath) => {
@@ -395,7 +400,7 @@ export class FormStore {
     // ===== Will get fully compare when not config namePathList =====
     if (!namePathList) {
       return isAllFieldsTouched
-        ? fieldEntities.every(isFieldTouched)
+        ? fieldEntities.every(entity => isFieldTouched(entity) || entity.isList())
         : fieldEntities.some(isFieldTouched);
     }
 
@@ -510,8 +515,10 @@ export class FormStore {
               );
             } else if (records) {
               const originValue = this.getFieldValue(namePath);
+              const isListField = field.isListField();
+
               // Set `initialValue`
-              if (!info.skipExist || originValue === undefined) {
+              if (!isListField && (!info.skipExist || originValue === undefined)) {
                 this.updateStore(setValue(this.store, namePath, [...records][0].value));
               }
             }
@@ -780,6 +787,8 @@ export class FormStore {
       {
         name,
         value,
+        errors: [],
+        warnings: [],
       },
     ]);
   };
@@ -885,7 +894,7 @@ export class FormStore {
     const TMP_SPLIT = String(Date.now());
     const validateNamePathList = new Set<string>();
 
-    const recursive = options?.recursive;
+    const { recursive, dirty } = options || {};
 
     this.getFieldEntities(true).forEach((field: FieldEntity) => {
       // Add field if not provide `nameList`
@@ -895,6 +904,11 @@ export class FormStore {
 
       // Skip if without rule
       if (!field.props.rules || !field.props.rules.length) {
+        return;
+      }
+
+      // Skip if only validate dirty field
+      if (dirty && !field.isFieldDirty()) {
         return;
       }
 
@@ -968,7 +982,9 @@ export class FormStore {
       })
       .catch((results: { name: InternalNamePath; errors: string[] }[]) => {
         const errorList = results.filter(result => result && result.errors.length);
+        const errorMessage = errorList[0]?.errors?.[0];
         return Promise.reject({
+          message: errorMessage,
           values: this.getFieldsValue(namePathList),
           errorFields: errorList,
           outOfDate: this.lastValidatePromise !== summaryPromise,
@@ -1013,7 +1029,7 @@ export class FormStore {
 }
 
 function useForm<Values = any>(form?: FormInstance<Values>): [FormInstance<Values>] {
-  const formRef = React.useRef<FormInstance>();
+  const formRef = React.useRef<FormInstance>(null);
   const [, forceUpdate] = React.useState({});
 
   if (!formRef.current) {
